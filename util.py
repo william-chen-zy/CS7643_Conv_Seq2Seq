@@ -14,5 +14,8 @@ def get_padding(input_tensor, input_size: tuple, stride: tuple, kernel_size: tup
         p_w = ((w_old - 1) * s_w - w_old + k_w)/2
     return nn.functional.pad(input_tensor,
                              (floor(p_w), ceil(p_w),
-                              floor(p_h), floor(p_h)),
+                              floor(p_h), ceil(p_h)),
                              pad_mode, c)
+    
+def train():
+    pass
