@@ -14,12 +14,13 @@ class Encoder(nn.Module):
                  enc_shape=[None, 49, 54, 1], 
                  kernel_size = (2, 7), 
                  stride=(2, 1)):
-        super(Encoder, self).__init__()
+        super().__init__()
         self.nfilters = nfilters
         self.input_h = enc_shape[1]
         self.input_w = enc_shape[2]
         self.kernel_size = kernel_size
         self.stride = stride
+        self.enc_dim_desc = enc_dim_desc
         
         self.conv1 = nn.Conv2d(in_channels=1, 
                                out_channels=self.nfilters * 4,
