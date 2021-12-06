@@ -10,6 +10,7 @@ import random
 import sys
 import time
 import h5py
+import torch
 
 import numpy as np
 from six.moves import xrange # pylint: disable=redefined-builtin

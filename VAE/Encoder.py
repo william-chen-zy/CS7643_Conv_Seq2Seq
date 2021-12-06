@@ -9,7 +9,7 @@ class Encoder(nn.Module):
     def __init__(self,
                  nfilters,
                 #  re_term,  # for weights_regularizer
-                 enc_dim=527,
+                #  enc_dim=527,
                  enc_dim_desc={'hidden_num':512, 'class_num': 15},
                  enc_shape=[None, 49, 54, 1], 
                  kernel_size = (2, 7), 
@@ -21,6 +21,8 @@ class Encoder(nn.Module):
         self.kernel_size = kernel_size
         self.stride = stride
         self.enc_dim_desc = enc_dim_desc
+        if self.enc_dim_desc.get('class_num')==None:
+            self.enc_dim_desc['class_num'] = 0
         
         self.conv1 = nn.Conv2d(in_channels=1, 
                                out_channels=self.nfilters * 4,
@@ -43,16 +45,17 @@ class Encoder(nn.Module):
         self.dropout = nn.Dropout(p=0.8)
         
         self.conv3 = nn.Conv2d(in_channels=self.nfilters * 4, 
-                               out_channels=self.nfilters * 8,
+                               out_channels=self.nfilters * 4,
                                kernel_size=kernel_size,
                                stride=stride,
                                #weights_regularizer=tcl.l2_regularizer(self.re_term), #specific to tf?
                                )
-        self.batch_norm3 = nn.BatchNorm2d(num_features=self.nfilters * 8)
+        self.batch_norm3 = nn.BatchNorm2d(num_features=self.nfilters * 4)
         self.relu3 = nn.LeakyReLU(negative_slope=0.2)
         
-        self.fc = nn.Linear(self.input_h*self.input_w*self.nfilters * 8, enc_dim)
-    
+        self.fc = nn.Linear(self.input_h*self.input_w*self.nfilters * 4, enc_dim_desc['hidden_num']+enc_dim_desc['class_num'])
+        self.softmax = nn.Softmax(dim=1)
+        
     def forward(self, encoder_inputs):
         
         N, H, W, C = encoder_inputs.shape
@@ -87,5 +90,10 @@ class Encoder(nn.Module):
         out = torch.flatten(out, start_dim=1)
         out = self.fc(out)
         
-        return out
+        hlayer, hlogits = torch.split(out,
+                                      [self.enc_dim_desc['hidden_num'], self.enc_dim_desc['class_num']],
+                                      dim=1)
+        hlogits = self.softmax(hlogits)
+        
+        return hlayer, hlogits
     

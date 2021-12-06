@@ -4,10 +4,11 @@ from torch import nn
 
 class ConvSeq2Seq(nn.Module):
     
-    def __init__(self, encoder, decoder, window_length, concat_input_output=True):
+    def __init__(self, encoder, decoder, window_length, device, concat_input_output=True):
         super().__init__()
-        self.encoder = encoder
-        self.decoder = decoder
+        self.device = device
+        self.encoder = encoder.to(device)
+        self.decoder = decoder.to(device)
         self.window_length = window_length
         self.length_input = 50
         self.length_output = 25
@@ -18,20 +19,21 @@ class ConvSeq2Seq(nn.Module):
         try:
             self.enc_class_num = self.encoder.enc_dim_desc['class_num']
         except:
+            self.encoder.enc_dim_desc['class_num'] = 0 # test 
             self.enc_class_num = 0
         
-        self.softmax = nn.Softmax(dim=1)
+        # self.softmax = nn.Softmax(dim=1)
     
     def forward(self, encoder_data, discriminator_data):
-        encoder_output = self.encoder.forward(encoder_data)
-        if self.enc_class_num != 0:
-            # print("encoder_output: ", encoder_output.shape)
-            hlayer, hlogits = torch.split(encoder_output,
-                                       [self.enc_hidden_num, self.enc_class_num],
-                                       dim=1)
-            hlogits = self.softmax(hlogits)
-        else:
-            hlayer = encoder_output
+        hlayer, hlogits = self.encoder.forward(encoder_data)
+        # if self.enc_class_num != 0:
+        #     # print("encoder_output: ", encoder_output.shape)
+        #     hlayer, hlogits = torch.split(encoder_output,
+        #                                [self.enc_hidden_num, self.enc_class_num],
+        #                                dim=1)
+        #     hlogits = self.softmax(hlogits)
+        # else:
+        #     hlayer = encoder_output
     
         predicted_res = []
         windowLength = self.window_length

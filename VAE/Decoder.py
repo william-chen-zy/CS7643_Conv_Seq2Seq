@@ -16,7 +16,7 @@ class Decoder(nn.Module):
         
     def forward(self, encoder_hidden, decoder_inputs):
         
-        st_hidden = self.st_encoder(decoder_inputs)
+        st_hidden, _ = self.st_encoder(decoder_inputs)
         
         out = torch.cat([encoder_hidden, st_hidden],dim=1)
         

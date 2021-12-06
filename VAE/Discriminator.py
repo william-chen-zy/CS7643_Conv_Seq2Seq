@@ -19,9 +19,11 @@ class Discriminator(nn.Module):
     
     def forward(self, seq_data, class_data):
         
-        out = self.d_encoder.forward(seq_data)
+        out,_ = self.d_encoder.forward(seq_data)
         out = self.relu(out)
         out = torch.cat([out, class_data], dim=1)
+        # print('out: ',out.device)
+        # print(out)
         out = self.fc1(out)
         out = self.fc2(out)
         out = self.sigmoid(out)
