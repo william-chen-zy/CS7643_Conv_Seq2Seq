@@ -15,7 +15,7 @@ class Discriminator(nn.Module):
         self.relu = nn.ReLU()
         self.fc1 = nn.Linear(enc_dim_desc['hidden_num']+enc_dim_desc['class_num'], nfilters*8)
         self.fc2 = nn.Linear(nfilters*8, 1)
-        self.sigmoid = nn.Sigmoid()
+        # self.sigmoid = nn.Sigmoid()
     
     def forward(self, seq_data, class_data):
         
@@ -26,6 +26,6 @@ class Discriminator(nn.Module):
         # print(out)
         out = self.fc1(out)
         out = self.fc2(out)
-        out = self.sigmoid(out)
+        # out = self.sigmoid(out)
         
         return out
