@@ -258,7 +258,7 @@ class DataLoader(object):
         return srnn_gts_euler
 
 
-    def compute_test_error(self,action, pred_pose,srnn_gts_expmap,srnn_gts_euler,one_hot,samples_fname):
+    def compute_test_error(self,action, pred_pose,srnn_gts_expmap,srnn_gts_euler,one_hot,samples_fname, model_tuning=False):
         """
         Compute the test error 
         """
@@ -294,27 +294,32 @@ class DataLoader(object):
 
         mean_mean_errors = np.mean(mean_errors, 0)
 
-        print()
-        print(action)
-        print()
-        print("{0: <16} |".format("milliseconds"), end="")
-        for ms in [80, 160, 320, 400, 560, 1000]:
-          print(" {0:5d} |".format(ms), end="")
-        print()
+        
+        if not model_tuning:
+            print()
+            print(action)
+            print()
+            print("{0: <16} |".format("milliseconds"), end="")
+            for ms in [80, 160, 320, 400, 560, 1000]:
+                print(" {0:5d} |".format(ms), end="")
+                print()
 
-        print("{0: <16} |".format(action), end="")
-        for ms in [1,3,7,9,13,24]:
-            if self.seq_length_out >= ms+1:
-              print(" {0:.3f} |".format( mean_mean_errors[ms] ), end="")
-            else:
-              print("   n/a |", end="")
-        print()
+            print("{0: <16} |".format(action), end="")
+            for ms in [1,3,7,9,13,24]:
+                if self.seq_length_out >= ms+1:
+                    print(" {0:.3f} |".format( mean_mean_errors[ms] ), end="")
+                else:
+                    print("   n/a |", end="")
+            print()
 
-        with h5py.File(samples_fname, 'a') as hf:
-            for i in np.arange(8):
-                node_name = 'expmap/gt/{1}_{0}'.format(i, action)
-                hf.create_dataset(node_name, data=srnn_gts_expmap[action][i])
-                node_name = 'expmap/preds/{1}_{0}'.format(i, action)
-                hf.create_dataset(node_name, data=predict_expmap[i])
-            node_name = 'mean_{0}_error'.format(action)
-            hf.create_dataset(node_name, data=mean_mean_errors)
+            with h5py.File(samples_fname, 'a') as hf:
+                for i in np.arange(8):
+                    node_name = 'expmap/gt/{1}_{0}'.format(i, action)
+                    hf.create_dataset(node_name, data=srnn_gts_expmap[action][i])
+                    node_name = 'expmap/preds/{1}_{0}'.format(i, action)
+                    hf.create_dataset(node_name, data=predict_expmap[i])
+                node_name = 'mean_{0}_error'.format(action)
+                hf.create_dataset(node_name, data=mean_mean_errors)
+            return mean_mean_errors
+        else: 
+            return mean_mean_errors

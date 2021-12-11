@@ -8,6 +8,13 @@ import timeit
 import os
 import shutil
 import h5py
+from hyperopt import hp, fmin, tpe, STATUS_OK, Trials
+
+import VAE.DataLoader as DataLoader
+import VAE.Encoder as Encoder
+import VAE.Decoder as Decoder
+import VAE.ConvSeq2Seq as ConvSeq2Seq
+import VAE.Discriminator as Discriminator
 
 # def get_padding(input_tensor, input_size: tuple, stride: tuple, kernel_size: tuple, padding='same', pad_mode='constant', c=0):
 #     h_old, w_old = input_size
@@ -52,10 +59,10 @@ def get_padding(input_tensor, input_size: tuple, stride: tuple, kernel_size: tup
 def train(dloader, 
           generator, 
           discriminator, 
-          G_criterion, 
-          D_criterion, 
-          optimizerG, 
-          optimizerD,
+        #   G_criterion, 
+        #   D_criterion, 
+        #   optimizerG, 
+        #   optimizerD,
           device='cuda',
           batch = 16,
           lr=5e-5,
@@ -64,11 +71,16 @@ def train(dloader,
           L2_lambda = 0.001,
           iterations = 20000,
           display = 100,
+          tensorboard=True,
+          save_model=True,
           model_name='default_setting'):
     
     if os.path.exists('logs/' + model_name):
         shutil.rmtree('logs/' + model_name)
-    writer = SummaryWriter('logs/' + model_name)
+    if tensorboard:
+        writer = SummaryWriter('logs/' + model_name)
+    else:
+        writer = None
     
     start=timeit.default_timer()
     
@@ -83,6 +95,9 @@ def train(dloader,
     G_LOSS = []
     d_loss_in_training =[]
     g_loss_in_training =[]
+    
+    # previous_loss_discriminator = 9999
+    # previous_loss_generator = 9999
     
     for i in range(iterations):
         generator.train()
@@ -137,11 +152,17 @@ def train(dloader,
         
         optimizerG.step()
         
+        # if (float(loss_discriminator)>previous_loss_discriminator*5) or (float(loss_generator)>previous_loss_generator*5):
+        #     break
+        # else:
         D_LOSS += [float(loss_discriminator)]
         G_LOSS += [float(loss_generator)]
+            # previous_loss_discriminator = float(loss_discriminator)
+            # previous_loss_generator = float(loss_generator)
         
-        writer.add_scalars('Train',{'Discriminator':loss_discriminator, 'Generator': loss_generator}, global_step=i)
-        writer.add_scalar('Train/Learning rate', lr, global_step=i)
+        if tensorboard:
+            writer.add_scalars('Train',{'Discriminator':loss_discriminator, 'Generator': loss_generator}, global_step=i)
+            writer.add_scalar('Train/Learning rate', lr, global_step=i)
 
         if (i >= lr_decay_steps) and (i % lr_decay_steps == 0):
             lr = lr * lr_decay
@@ -161,11 +182,11 @@ def train(dloader,
             for action in dloader.actions:
                 encoder_data, discriminator_data, yhat = dloader.get_test_batch(action)
                 test(encoder_data, discriminator_data, action, generator, global_step=i, 
-                     device=device, tb_writer=writer)
-
-        if (i > 0) and (i % 2000 == 0):
-            torch.save(generator.state_dict(), 'model/generator_{}_{}_steps.pt'.format(model_name, i))
-            torch.save(discriminator.state_dict(), 'model/discriminator_{}_{}_steps.pt'.format(model_name, i))
+                     device=device, tensorboard=tensorboard, tb_writer=writer)
+        if save_model:
+            if (i > 0) and (i % 2000 == 0):
+                torch.save(generator.state_dict(), 'model/generator_{}_{}_steps.pt'.format(model_name, i))
+                torch.save(discriminator.state_dict(), 'model/discriminator_{}_{}_steps.pt'.format(model_name, i))
         
 def test(encoder_data, 
          discriminator_data,
@@ -173,6 +194,7 @@ def test(encoder_data,
          generator, 
          global_step=None,
          device='cuda',
+         tensorboard=True,
          tb_writer=None):
     
     G_criterion = nn.MSELoss()
@@ -184,14 +206,16 @@ def test(encoder_data,
 
     predicted_seq, predicted_action, generated_sample = generator.forward(encoder_data, discriminator_data)
     ReconstructError = G_criterion(predicted_seq, expected_seq)
-    tb_writer.add_scalar('TestErrors/'+action,ReconstructError, global_step)
+    if tensorboard:
+        tb_writer.add_scalar('TestErrors/'+action,ReconstructError, global_step)
 
 def InferenceSample(dloader, 
                     generator, 
                     iter=20000, 
                     one_hot=False, 
                     device='cuda', 
-                    model_name=None):
+                    model_name=None,
+                    model_tuning=False):
              
         one_hot=one_hot
         srnn_gts_expmap = dloader.get_srnn_gts(one_hot, to_euler=False)
@@ -204,7 +228,8 @@ def InferenceSample(dloader,
         # except OSError:
         #     pass
         
-        step_time=[]
+        step_time = []
+        accumulated_error = 0
         for action in dloader.actions:
 
             start_time = timeit.default_timer()
@@ -220,5 +245,100 @@ def InferenceSample(dloader,
             # print('predicted_seq: ', predicted_seq.shape)
             # print('srnn_gts_expmap: ', len(srnn_gts_expmap[action]))
             # print('srnn_gts_euler: ', len(srnn_gts_euler[action]))
-            dloader.compute_test_error(action, predicted_seq.to('cpu').detach().numpy(), srnn_gts_expmap, srnn_gts_euler, one_hot, SAMPLES_FNAME)
-        print (np.mean(step_time))
+            action_error = dloader.compute_test_error(action, predicted_seq.to('cpu').detach().numpy(), 
+                                                      srnn_gts_expmap, srnn_gts_euler, one_hot, SAMPLES_FNAME, 
+                                                      model_tuning=model_tuning)
+            accumulated_error += sum(action_error)
+        if model_tuning:
+            return accumulated_error
+        else:
+            print (np.mean(step_time))
+            
+
+
+def optimize(dloader, params):
+
+    lr = params['lr']
+    L2_lambda = params['L2_lambda']
+    lt_encoder_filters = params['lt_encoder_filters']
+    st_encoder_filters = params['st_encoder_filters']
+    d_encoder_filters = params['d_encoder_filters']
+    discriminator_output_filters = params['discriminator_output_filters']
+    kernel_height = params['kernel_height']
+    kernel_width = params['kernel_width']
+    stride_vert = params['stride_vert']
+    stride_hori = params['stride_hori']
+    
+    device = params['device']
+    
+    textstr = '\n'.join((
+                        r'='*60,
+                        r'Using device: {}'.format(device),
+                        r'Training on following parameters: ',
+                        r'lr=%.8f' % (lr, ),
+                        r'L2_lambda=%.2f' % (L2_lambda, ),
+                        r'lt_encoder_filters size=%.2f' % (lt_encoder_filters, ),
+                        r'st_encoder_filters size=%.2f' % (st_encoder_filters, ),
+                        r'd_encoder_filters size=%.2f' % (d_encoder_filters, ),
+                        r'discriminator_output_filters size=%.2f' % (discriminator_output_filters, ),
+                        r'kernel size=({},{})'.format(kernel_height, kernel_width),
+                        r'stride=({},{})'.format(stride_hori, stride_vert)))
+    print(textstr)
+    
+
+    lt_encoder = Encoder.Encoder(lt_encoder_filters,enc_shape=[None, 49, 54, 1], 
+                                 enc_dim_desc={ 'hidden_num': 512,'class_num': 15 }, 
+                                 stride=(stride_hori,stride_vert), 
+                                 kernel_size=(kernel_height, kernel_width))
+
+    st_encoder = Encoder.Encoder(st_encoder_filters,enc_shape=[None, 20, 54, 1], 
+                                 enc_dim_desc={ 'hidden_num': 512}, 
+                                 stride=(stride_hori,stride_vert), 
+                                 kernel_size=(kernel_height, kernel_width))
+    decoder = Decoder.Decoder(st_encoder)
+
+    generator = ConvSeq2Seq.ConvSeq2Seq(lt_encoder, decoder, window_length=20, device=device)
+
+    d_encoder = Encoder.Encoder(d_encoder_filters, enc_shape=[None, 75,54,1], 
+                                enc_dim_desc={ 'hidden_num': 512}, 
+                                stride=(stride_hori,stride_vert), 
+                                kernel_size=(kernel_height, kernel_width))
+    discriminator = Discriminator.Discriminator(discriminator_output_filters, d_encoder).to(device)
+
+
+    # # create loss function for both G and D
+    # G_criterion = nn.MSELoss()
+    # D_criterion = nn.BCEWithLogitsLoss()
+    # # Setup Adam optimizers for both G and D
+    # optimizerD = optim.Adam(discriminator.parameters(), lr=lr, weight_decay=0.001)
+    # optimizerG = optim.Adam(generator.parameters(), lr=lr, weight_decay=0.001)
+    
+    
+    train(dloader, 
+          generator, 
+          discriminator, 
+        #   G_criterion, 
+        #   D_criterion, 
+        #   optimizerG, 
+        #   optimizerD,
+          device=device,
+          batch = 16,
+          lr=lr,
+          lr_decay_steps = 10000,
+          lr_decay = 0.99,
+          L2_lambda = L2_lambda,
+          iterations = 1000,
+          display = 100,
+          tensorboard=False,
+          save_model=False,
+          model_name='default_setting_1000_itr')
+    
+    error = InferenceSample(dloader, generator, model_name='default_setting_1000_itr', model_tuning=True)
+    del dloader
+    del generator
+    del discriminator
+    torch.cuda.empty_cache()
+    print('Test error=%.5f' % (error, ))
+    return {'loss': error, 
+            'status': STATUS_OK, 
+            'params': params}
